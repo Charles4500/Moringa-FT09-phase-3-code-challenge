@@ -1,82 +1,89 @@
+from database.connection import get_db_connection
+
 class Author:
-    def __init__(self,id=None, name=None, conn = None):
-        self.name = name
-        self.conn = conn
+    def __init__(self, id, name):
         self.id = id
-      
-        if conn:
-            self.cursor = conn.cursor()
-            self.add_author()
+        self.name = name
 
     def __repr__(self):
-        return f'<Author {self.name}>'
-    
-    def __eq__(self, other):
-        if isinstance(other, Author):
-            return self.id == other.id and self.name == other.name
-        return False
+        return f'<Author {self.name}>'    
 
-    def __hash__(self):
-        return hash((self.id, self.name))
-    
-    def add_author(self):
-        sql_check = "SELECT id FROM authors WHERE name = ? LIMIT 1"
-        result = self.cursor.execute(sql_check,(self.name,)).fetchone()
-        if result:
-            self._id = result[0]
-        else:
-            sql = "INSERT INTO authors(name) VALUES (?)"
-            self.cursor.execute(sql, (self.name,))
-            self.conn.commit()
-            self._id = self.cursor.lastrowid
-    
     @property
     def id(self):
         return self._id
-    
+
     @id.setter
     def id(self, value):
-        if value is None:
-            self._id = 0  # Set a default value or handle None case appropriately
-        elif isinstance(value, int):
-            self._id = value
-        else:
-            raise ValueError("Invalid ID value")
-
+        if not isinstance(value, int):
+            raise ValueError("ID must be an integer")
+        self._id = value
 
     @property
-    def name(self): 
-        if not hasattr(self,"_name"):
-            sql = "SELECT name FROM author WHERE id = ?"
-            self.cursor.execute(sql,(self.id,))
-            row = self.cursor.fetchone()
-            if row:
-                self._name = row[0]
+    def name(self):
         return self._name
-    
+
     @name.setter
-    def name(self,name):
-        if isinstance(name,str) and len(name) and not hasattr(self,"_name"):
-            self._name = name
-        
-        else:
-            raise ValueError("Invalid name value")
-        
+    def name(self, value):
+        if not isinstance(value, str) or len(value) == 0:
+            raise ValueError("Name must be a non-empty string")
+        self._name = value
+
+    def save(self):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO authors (name) VALUES (?)", (self.name,))
+        self.id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+
     def articles(self):
         from models.article import Article
-        sql = "SELECT * FROM articles WHERE author_id = ?"
-        rows = self.cursor.execute(sql,(self.id,)).fetchall()
-        return [Article(id=row[0],title=row[1],content=row[2],author_id=row[3],magazine_id=row[4],conn=self.conn) for row in rows]
-    
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM articles WHERE author_id = ?", (self.id,))
+        articles = cursor.fetchall()
+        conn.close()
+        return [Article(article['id'], article['title'], article['content'], article['author_id'], article['magazine_id']) for article in articles]
+
     def magazines(self):
         from models.magazine import Magazine
-        sql = """SELECT DISTINCT magazines.id, magazines.name, magazines.category FROM magazines INNER JOIN articles ON articles.magazine_id = magazines.id WHERE articles.author_id = ?"""
-        rows = self.cursor.execute(sql,(self.id,)).fetchall()
-        return [Magazine(id=row[0],name=row[1],category=row[2],conn=self.conn) for row in rows]
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT DISTINCT magazines.* FROM magazines
+            JOIN articles ON magazines.id = articles.magazine_id
+            WHERE articles.author_id = ?
+        """, (self.id,))
+        magazines = cursor.fetchall()
+        conn.close()
+        return [Magazine(magazine['id'], magazine['name'], magazine['category']) for magazine in magazines]
 
     @classmethod
-    def get_all_authors(cls,conn):
-        sql = "SELECT * FROM authors"
+    def create_table(cls):
+        conn = get_db_connection()
         cursor = conn.cursor()
-        authors = cursor.execute(sql).fetchall()
-        return [cls(name=author[1],conn=conn) for author in authors]
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS authors (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+    @classmethod
+    def drop_table(cls):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DROP TABLE IF EXISTS authors")
+        conn.commit()
+        conn.close()
+
+    @classmethod
+    def all(cls):
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM authors")
+        authors = cursor.fetchall()
+        conn.close()
+        return [cls(author['id'], author['name']) for author in authors]
